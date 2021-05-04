@@ -182,6 +182,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "md-5",
+ "rand",
  "serde",
  "sha-1",
  "tempfile",

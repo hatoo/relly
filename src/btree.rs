@@ -272,7 +272,10 @@ impl Iter {
 
 #[cfg(test)]
 mod tests {
+    use rand::prelude::*;
     use tempfile::tempfile;
+
+    use std::collections::BTreeMap;
 
     use crate::{buffer::BufferPool, disk::DiskManager};
 
@@ -339,5 +342,53 @@ mod tests {
             .get()
             .unwrap();
         assert_eq!(b"hello", &value[..]);
+    }
+
+    #[test]
+    fn test_random() {
+        let disk = DiskManager::new(tempfile().unwrap()).unwrap();
+        let pool = BufferPool::new(10);
+        let mut bufmgr = BufferPoolManager::new(disk, pool);
+        let btree = BTree::create(&mut bufmgr).unwrap();
+
+        let mut rng = StdRng::from_seed([0xDE; 32]);
+        let mut memory: BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+
+        for _ in 0..512 {
+            let key = loop {
+                // OK if let mut key = vec![0; rng.gen_range(0..32)];
+                let mut key = vec![0; rng.gen_range(0..512)];
+                rng.fill(key.as_mut_slice());
+                if !memory.contains_key(&key) {
+                    break key;
+                }
+            };
+            let value = {
+                let mut value = vec![0; rng.gen_range(0..512)];
+                rng.fill(value.as_mut_slice());
+                value
+            };
+            btree.insert(&mut bufmgr, &key, &value).unwrap();
+            assert!(memory.insert(key, value).is_none());
+
+            let mut iter = btree.search(&mut bufmgr, SearchMode::Start).unwrap();
+            let mut snapshot: BTreeMap<Vec<u8>, Vec<u8>> = Default::default();
+
+            while let Some((key, value)) = iter.next(&mut bufmgr).unwrap() {
+                snapshot.insert(key, value);
+            }
+            assert_eq!(snapshot.len(), memory.len());
+            assert_eq!(snapshot, memory);
+            for (k, v) in memory.iter() {
+                let (bk, bv) = btree
+                    .search(&mut bufmgr, SearchMode::Key(k.clone()))
+                    .unwrap()
+                    .get()
+                    .unwrap();
+
+                assert_eq!(&bk, k);
+                assert_eq!(&bv, v);
+            }
+        }
     }
 }
